@@ -233,7 +233,7 @@ function simple_markdown_to_html(string $markdown): string
     $html = preg_replace('/`([^`]+)`/', '<code>$1</code>', $html);
     $html = preg_replace('/\\[(.*?)\\]\\((.*?)\\)/', '<a href="$2">$1</a>', $html);
     $html = preg_replace_callback(
-        '#(?<![\\w/])((?:https?://)[^\\s<>"\\']+)#',
+        "/(?<![\\w\\/])((?:https?:\\/\\/)[^\\s<>\"']+)/",
         static function (array $matches): string {
             $url = $matches[1];
             $url = rtrim($url, ".,;:!?)]}>");
