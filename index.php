@@ -86,6 +86,68 @@ function get_request_path(): string
     return $path;
 }
 
+function start_frontend_session(): void
+{
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+}
+
+function is_frontend_authenticated(): bool
+{
+    start_frontend_session();
+    $expectedToken = getenv('AGENT_NOTEBOOK_TOKEN') ?: '';
+    if ($expectedToken === '') {
+        return false;
+    }
+    if (!isset($_SESSION['agent_notebook_authenticated'], $_SESSION['agent_notebook_token'])) {
+        return false;
+    }
+    return $_SESSION['agent_notebook_authenticated'] === true
+        && hash_equals((string)$_SESSION['agent_notebook_token'], $expectedToken);
+}
+
+function render_frontend_login(string $error = ''): void
+{
+    $safeError = htmlspecialchars($error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    $returnTo = htmlspecialchars($_SERVER['REQUEST_URI'] ?? '/', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    echo <<<HTML
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Notebook Login</title>
+  <style>
+    :root { color-scheme: dark; --panel:#121826; --text:#ecf0f6; --muted:#98a2b3; --accent:#5dd6ff; --warn:#ffcc66; }
+    html,body{margin:0;height:100%;font-family:Inter, "Segoe UI", sans-serif;background:radial-gradient(circle at 25% 0%, #1a2236 0%, #090b11 52%, #090b11 100%);color:var(--text);}
+    .wrap{max-width:420px;margin:80px auto;padding:20px}
+    .card{background:var(--panel);border:1px solid #242f43;border-radius:16px;padding:22px}
+    input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #2d3d57;background:#0b111e;color:var(--text)}
+    button{margin-top:12px;padding:10px 14px;border:0;border-radius:10px;background:#2b6cff;color:white;font-weight:600}
+    .hint{color:var(--muted);font-size:13px;margin-top:12px}
+    .warn{color:var(--warn);margin-top:8px;font-size:13px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Agent Notebook Login</h1>
+      <p class="hint">Enter your API key to access the notebook.</p>
+      <form method="POST" action="">
+        <input type="hidden" name="return_to" value="$returnTo" />
+        <input type="password" name="api_key" placeholder="API key" autofocus autocomplete="off" />
+        <button type="submit">Sign in</button>
+      </form>
+      <p class="warn">$safeError</p>
+    </div>
+  </div>
+</body>
+</html>
+HTML;
+    exit;
+}
+
 function normalize_path(string $path): string
 {
     $path = trim(str_replace('\\', '/', $path));
@@ -983,9 +1045,27 @@ if (strpos($uri, '/api/') === 0 || $uri === '/api' || $uri === '/api/agents.md')
         exit;
     }
 
-if ($method === 'GET' && ($uri === '/' || $uri === '/doc' || string_starts_with($uri, '/doc/'))) {
-    // Frontend pages require a valid token, same as API auth policy.
-    require_auth();
+if (($method === 'GET' || $method === 'POST') && ($uri === '/' || $uri === '/doc' || string_starts_with($uri, '/doc/'))) {
+    if ($method === 'POST') {
+        $submittedToken = trim((string)($_POST['api_key'] ?? ''));
+        $expectedToken = getenv('AGENT_NOTEBOOK_TOKEN') ?: '';
+        if ($submittedToken !== '' && $expectedToken !== '' && hash_equals($expectedToken, $submittedToken)) {
+            start_frontend_session();
+            $_SESSION['agent_notebook_authenticated'] = true;
+            $_SESSION['agent_notebook_token'] = $submittedToken;
+            $returnTo = $_POST['return_to'] ?? $uri;
+            if (!is_string($returnTo) || trim($returnTo) === '') {
+                $returnTo = $uri;
+            }
+            header('Location: ' . $returnTo);
+            exit;
+        }
+        render_frontend_login('Invalid API key.');
+    }
+
+    if (!is_frontend_authenticated()) {
+        render_frontend_login('Please sign in with a valid API key.');
+    }
     $selectedPath = '';
     if (string_starts_with($uri, '/doc/')) {
         $selectedPath = rawurldecode(substr($uri, 5));
