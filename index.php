@@ -656,16 +656,16 @@ function render_ui(string $token): void
         return;
       }
       meta.innerHTML = [
-        `<span>revision ${doc.revision || 1}</span>`,
-        `<span>agent ${doc.agent_name || ''}</span>`,
-        `<span>updated ${doc.updated_at || ''}</span>`,
-        `<span>attachments ${((doc.attachments || []).length)}</span>`
+        `<span>revision \${doc.revision || 1}</span>`,
+        `<span>agent \${doc.agent_name || ''}</span>`,
+        `<span>updated \${doc.updated_at || ''}</span>`,
+        `<span>attachments \${((doc.attachments || []).length)}</span>`
       ].join('');
 
       const attachmentList = document.getElementById('attachmentList');
       if ((doc.attachments || []).length) {
-        const lines = (doc.attachments || []).map(a => `<a href="/api/attachment?id=${a.id}" target="_blank">${a.filename}</a> (${a.size_bytes} bytes)`).join(' · ');
-        attachmentList.innerHTML = `Attachments: ${lines}`;
+        const lines = (doc.attachments || []).map(a => `<a href="/api/attachment?id=\${a.id}" target="_blank">\${a.filename}</a> (\${a.size_bytes} bytes)`).join(' · ');
+        attachmentList.innerHTML = `Attachments: \${lines}`;
       } else {
         attachmentList.textContent = '';
       }
