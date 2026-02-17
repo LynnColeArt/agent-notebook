@@ -610,15 +610,107 @@ function recent_documents(PDO $pdo, int $limit = 12): array
     return $documents;
 }
 
-function render_ui(string $token, PDO $pdo): void
+function document_tree(PDO $pdo): array
 {
-    $token = htmlspecialchars($token, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    $stmt = $pdo->prepare('SELECT path, title, updated_at FROM documents ORDER BY path ASC');
+    $stmt->execute();
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $tree = [];
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $rawPath = trim((string)($row['path'] ?? ''));
+        if ($rawPath === '') {
+            continue;
+        }
+        $segments = preg_split('/\/+/', trim($rawPath, '/'));
+        if ($segments === false) {
+            continue;
+        }
+        $segments = array_values(array_filter($segments, 'strlen'));
+        if (!$segments) {
+            continue;
+        }
+
+        $node = &$tree;
+        $segmentCount = count($segments);
+        foreach ($segments as $index => $segment) {
+            $safeSegment = $segment;
+            if (!array_key_exists($safeSegment, $node)) {
+                $node[$safeSegment] = [
+                    'name' => $segment,
+                    'children' => [],
+                    'document' => null,
+                ];
+            }
+
+            if ($index === $segmentCount - 1) {
+                $node[$safeSegment]['document'] = [
+                    'path' => $rawPath,
+                    'title' => isset($row['title']) ? (string)$row['title'] : $rawPath,
+                    'updated_at' => $row['updated_at'] ?? null,
+                ];
+                $node = &$node[$safeSegment]['children'];
+            } else {
+                $node = &$node[$safeSegment]['children'];
+            }
+        }
+        unset($node);
+    }
+
+    return $tree;
+}
+
+function render_document_tree_html(array $tree): string
+{
+    if (empty($tree)) {
+        return '<p class="small">No documents yet.</p>';
+    }
+
+    $renderNode = function (array $node) use (&$renderNode): string {
+        ksort($node, SORT_STRING);
+        $html = '<ul class="tree">';
+        foreach ($node as $item) {
+            $folderName = htmlspecialchars((string)($item['name'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $document = $item['document'] ?? null;
+            $children = is_array($item['children'] ?? null) ? $item['children'] : [];
+
+            $html .= '<li>';
+            if (is_array($document)) {
+                $path = (string)($document['path'] ?? '');
+                $title = htmlspecialchars((string)($document['title'] ?? $path), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                $safePath = htmlspecialchars($path, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                $html .= '<a href="?path=' . $safePath . '" class="doc-link" data-doc-path="' . $safePath . '">' . $title . '</a>';
+            } else {
+                $html .= '<span class="folder">' . $folderName . '</span>';
+            }
+
+            if (!empty($children)) {
+                $childContent = $renderNode($children);
+                if ($childContent !== '<ul class="tree"></ul>') {
+                    $html .= $childContent;
+                }
+            }
+            $html .= '</li>';
+        }
+        $html .= '</ul>';
+
+        return $html;
+    };
+
+    return $renderNode($tree);
+}
+
+function render_ui(PDO $pdo): void
+{
     $title = 'Agent Notebook';
     $recent = recent_documents($pdo, 12);
     $recent_json = json_encode($recent, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     if ($recent_json === false) {
         $recent_json = '[]';
     }
+    $tree_html = render_document_tree_html(document_tree($pdo));
     echo <<<HTML
 <!doctype html>
 <html lang="en">
@@ -632,17 +724,15 @@ function render_ui(string $token, PDO $pdo): void
     .wrap{max-width:1100px;margin:0 auto;padding:20px}
     h1{margin:12px 0 2px}
     .hint{color:var(--muted); margin:0 0 18px}
-    .toolbar{display:grid;grid-template-columns:1fr 180px;gap:8px;margin-bottom:12px;align-items:center}
-    .toolbar input,.toolbar button{padding:10px;border-radius:10px;border:1px solid #2a3449;background:#0f1624;color:var(--text)}
-    .toolbar button{background:#1d2b44; cursor:pointer}
     .layout{display:grid;grid-template-columns:360px 1fr;gap:16px}
     .card{background:var(--panel);border:1px solid #242f43;border-radius:16px;padding:14px}
     .small{color:#b4bfd3;font-size:12px}
-    .preview{background:var(--panel);padding:12px;border:1px solid #27334a;border-radius:10px;min-height:430px;white-space:pre-wrap;line-height:1.45}
-    .preview h1,.preview h2,.preview h3{margin-top:0}
-    .preview img{max-width:100%}
-    .meta{display:flex;gap:10px;flex-wrap:wrap}
-    .meta span{display:inline-block;border:1px solid #31405e;padding:5px 10px;border-radius:999px}
+    .tree-list{list-style:none;padding:0;margin:0}
+    .tree-list ul{list-style:none;margin:6px 0 0;padding:0 0 0 16px}
+    .tree-list li{margin:7px 0}
+    .tree-list .folder{color:#9aa8be;font-weight:600;display:block}
+    .tree-list .doc-link{color:var(--text);text-decoration:none}
+    .tree-list .doc-link:hover{text-decoration:underline;color:var(--accent)}
     .doc-list{list-style:none;padding:0;margin:0}
     .doc-list li{margin-bottom:12px;padding:10px;border:1px solid #2c3a55;border-radius:10px;background:#101a2a}
     .doc-list a{display:block;color:var(--text);text-decoration:none;font-weight:600}
@@ -658,55 +748,31 @@ function render_ui(string $token, PDO $pdo): void
 <body>
   <div class="wrap">
     <h1>Agent Notebook</h1>
-    <p class="hint">A clean, read-only notebook for agents. Token-protected API with secure access to markdown pages.</p>
-    <div class="toolbar">
-      <input id="token" type="password" placeholder="AGENT NOTEBOOK TOKEN" value="$token" />
-      <button id="reloadBtn">Reload</button>
-    </div>
+    <p class="hint">A clean, read-only notebook for agents. Browse documents by hierarchy on the left and scan latest pages on the right.</p>
     <div class="status" id="status"></div>
     <div class="layout">
       <section class="card">
-        <h3>Latest uploads</h3>
-        <p class="small" style="margin:0 0 8px">Pick a title to open the page.</p>
-        <ul id="recent-list" class="doc-list"></ul>
-        <p class="small" id="empty-state" style="display:none;color:#7f8aa0">No uploads yet.</p>
+        <h3>Documents</h3>
+        <div class="tree-list" style="margin-top:8px;">
+          $tree_html
+        </div>
       </section>
       <section class="card">
-        <h3 id="doc-title">Home</h3>
-        <div class="meta" id="doc-meta" style="margin-bottom:12px"></div>
-        <div id="preview" class="preview">Select a document to read.</div>
+        <h3>Latest documents</h3>
+        <ul id="recent-list" class="doc-list" style="margin-top:8px;"></ul>
+        <p class="small" id="empty-state" style="display:none;color:#7f8aa0;margin-top:8px;">No uploads yet.</p>
       </section>
     </div>
   </div>
   <script>
     const statusEl = document.getElementById('status');
     const recentList = document.getElementById('recent-list');
-    const docTitle = document.getElementById('doc-title');
-    const docMeta = document.getElementById('doc-meta');
-    const preview = document.getElementById('preview');
     const emptyState = document.getElementById('empty-state');
-    const reloadBtn = document.getElementById('reloadBtn');
     const recentPages = $recent_json;
-    const getAuthHeaders = () => ({
-      'Authorization': 'Bearer ' + (document.getElementById('token').value || '').trim()
-    });
 
     const setMessage = (msg, cls='warn') => {
       statusEl.textContent = msg;
       statusEl.className = 'status ' + cls;
-    };
-
-    const renderMeta = (doc) => {
-      if (!doc) {
-        docMeta.innerHTML = '';
-        return;
-      }
-      docMeta.innerHTML = [
-        `<span>path: \${doc.path || ''}</span>`,
-        `<span>updated: \${doc.updated_at || ''}</span>`,
-        `<span>agent: \${doc.agent_name || 'unknown'}</span>`,
-        `<span>revision: \${doc.revision || 1}</span>`
-      ].join('');
     };
 
     const renderRecent = () => {
@@ -724,54 +790,13 @@ function render_ui(string $token, PDO $pdo): void
         link.textContent = item.title || item.path;
         snippet.className = 'doc-snippet';
         snippet.textContent = item.snippet || '';
-        link.addEventListener('click', (evt) => {
-          evt.preventDefault();
-          loadDoc(item.path);
-          window.history.replaceState({}, '', `?path=\${encodeURIComponent(item.path)}`);
-        });
         li.appendChild(link);
         li.appendChild(snippet);
         recentList.appendChild(li);
       });
     };
-
-    const loadDoc = async (path) => {
-      if (!path) {
-        setMessage('No path selected');
-        return;
-      }
-      setMessage('Loading...');
-      const resp = await fetch('/api/page?path=' + encodeURIComponent(path), {
-        headers: getAuthHeaders()
-      });
-      const body = await resp.json();
-      if (!resp.ok) {
-        setMessage(body.error || 'Load failed');
-        return;
-      }
-      docTitle.textContent = body.title || path;
-      preview.innerHTML = body.content_html || '';
-      renderMeta(body);
-      setMessage('Loaded', 'ok');
-    };
-
-    const params = new URLSearchParams(window.location.search);
-    const initialPath = params.get('path');
     renderRecent();
-    if (initialPath) {
-      loadDoc(initialPath);
-    } else {
-      setMessage('Ready');
-    }
-
-    reloadBtn.onclick = () => {
-      const path = new URLSearchParams(window.location.search).get('path');
-      if (!path) {
-        setMessage('Choose a document from the list');
-        return;
-      }
-      loadDoc(path);
-    };
+    setMessage('Ready');
   </script>
 </body>
 </html>
@@ -805,8 +830,7 @@ if ($uri === '/agents.md') {
 }
 
 if ($method === 'GET' && $uri === '/') {
-    $token = getenv('AGENT_NOTEBOOK_TOKEN') ?: '';
-    render_ui((string)$token, $db);
+    render_ui($db);
 }
 
 json_response(['success' => true, 'message' => 'Agent Notebook is running', 'routes' => ['/api/page', '/api/children', '/api/upload', '/api/attachment', '/api/agents.md']], 200);
