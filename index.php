@@ -984,6 +984,8 @@ if (strpos($uri, '/api/') === 0 || $uri === '/api' || $uri === '/api/agents.md')
     }
 
 if ($method === 'GET' && ($uri === '/' || $uri === '/doc' || string_starts_with($uri, '/doc/'))) {
+    // Frontend pages require a valid token, same as API auth policy.
+    require_auth();
     $selectedPath = '';
     if (string_starts_with($uri, '/doc/')) {
         $selectedPath = rawurldecode(substr($uri, 5));
