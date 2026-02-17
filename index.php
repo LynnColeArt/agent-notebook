@@ -925,11 +925,12 @@ function render_ui(PDO $pdo, string $selectedPath = ''): void
   <style>
     :root { color-scheme: dark; --bg:#090b11; --panel:#121826; --muted:#98a2b3; --text:#ecf0f6; --accent:#5dd6ff; --card:#1b2231; }
     html,body { margin:0; font-family: Inter, "Segoe UI", sans-serif; background: radial-gradient(circle at 25% 0%, #1a2236 0%, #090b11 52%, #090b11 100%); color: var(--text); min-height:100%; }
-    .wrap{max-width:1100px;margin:0 auto;padding:20px}
+    .wrap{width: min(98vw, 1800px);margin:0 auto;padding:20px;box-sizing:border-box}
     h1{margin:12px 0 2px}
     .hint{color:var(--muted); margin:0 0 18px}
-    .layout{display:grid;grid-template-columns:minmax(420px, 1.2fr) minmax(380px, 1fr);gap:16px;align-items:start}
+    .layout{display:grid;grid-template-columns:clamp(360px, 31vw, 460px) minmax(0, 1fr);gap:16px;align-items:start}
     .left-column{display:flex;flex-direction:column;gap:16px}
+    .left-column,.workspace{min-width:0}
     .card{background:var(--panel);border:1px solid #242f43;border-radius:16px;padding:14px}
     .small{color:#b4bfd3;font-size:12px}
     .tree-list{list-style:none;padding:0;margin:0}
