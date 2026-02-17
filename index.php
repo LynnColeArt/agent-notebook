@@ -610,6 +610,70 @@ function recent_documents(PDO $pdo, int $limit = 12): array
     return $documents;
 }
 
+function is_image_mime(string $mimeType): bool
+{
+    $normalized = strtolower(trim($mimeType));
+    return string_starts_with($normalized, 'image/');
+}
+
+function attachment_image_html(PDO $pdo, array $attachment): string
+{
+    if (!is_image_mime((string)($attachment['mime_type'] ?? ''))) {
+        return '';
+    }
+    $storedName = trim((string)($attachment['stored_name'] ?? ''));
+    if ($storedName === '') {
+        return '';
+    }
+    $filePath = get_storage_root() . '/' . $storedName;
+    if (!is_file($filePath)) {
+        return '';
+    }
+    $mimeType = trim((string)($attachment['mime_type'] ?? 'image/png'));
+    $data = file_get_contents($filePath);
+    if ($data === false) {
+        return '';
+    }
+    $encoded = base64_encode($data);
+    $label = htmlspecialchars((string)($attachment['filename'] ?? $storedName), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    return '<figure><img src="data:' . htmlspecialchars($mimeType, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . ';base64,' . $encoded . '" alt="' . $label . '" /><figcaption>' . $label . '</figcaption></figure>';
+}
+
+function render_document_view(PDO $pdo, string $path): string
+{
+    try {
+        $normalized = normalize_path($path);
+    } catch (InvalidArgumentException) {
+        return '<section class="card selected-doc"><h3>Document</h3><p class="warn">Invalid document path.</p></section>';
+    }
+
+    if ($normalized === '') {
+        return '<section class="card selected-doc"><h3>Document</h3><p class="small">Select a document from the left tree or latest list to preview it.</p></section>';
+    }
+
+    $document = get_document($pdo, $normalized);
+    if (!$document) {
+        return '<section class="card selected-doc"><h3>Document</h3><p class="warn">Document not found.</p></section>';
+    }
+
+    $title = htmlspecialchars((string)($document['title'] ?? $normalized), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    $content = simple_markdown_to_html((string)($document['content'] ?? ''));
+    $attachmentsHtml = '';
+    $attachments = is_array($document['attachments'] ?? null) ? $document['attachments'] : [];
+    if (!empty($attachments)) {
+        $attachmentCards = '';
+        foreach ($attachments as $attachment) {
+            $attachmentCards .= attachment_image_html($pdo, (array)$attachment);
+        }
+        if (trim($attachmentCards) !== '') {
+            $attachmentsHtml = '<div class="attachments"><h4>Attachments</h4>' . $attachmentCards . '</div>';
+        }
+    }
+
+    $pathLabel = htmlspecialchars($normalized, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    return '<section class="card selected-doc"><h3>' . $title . '</h3><p class="small doc-path">' . $pathLabel . '</p><div class="doc-content">' . $content . '</div>' . $attachmentsHtml . '</section>';
+}
+
 function document_tree(PDO $pdo): array
 {
     $stmt = $pdo->prepare('SELECT path, title, updated_at FROM documents ORDER BY path ASC');
@@ -711,6 +775,8 @@ function render_ui(PDO $pdo): void
         $recent_json = '[]';
     }
     $tree_html = render_document_tree_html(document_tree($pdo));
+    $selectedPath = isset($_GET['path']) ? trim((string)$_GET['path']) : '';
+    $selectedDocument = render_document_view($pdo, $selectedPath);
     echo <<<HTML
 <!doctype html>
 <html lang="en">
@@ -738,6 +804,16 @@ function render_ui(PDO $pdo): void
     .doc-list a{display:block;color:var(--text);text-decoration:none;font-weight:600}
     .doc-list a:hover{text-decoration:underline;color:var(--accent)}
     .doc-snippet{margin:8px 0 0;color:#aeb8cc;font-size:13px;line-height:1.35}
+    .workspace{margin-top:16px}
+    .doc-content h1,.doc-content h2,.doc-content h3{margin-top:0}
+    .doc-content pre{background:#060a14;padding:10px;border-radius:8px;overflow:auto}
+    .doc-content code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace}
+    .doc-content img{max-width:100%;border-radius:8px;border:1px solid #28314a}
+    .attachments{margin-top:16px}
+    .attachments figure{margin:0 0 12px}
+    .attachments img{display:block;max-width:100%;margin-bottom:8px}
+    .attachments figcaption{font-size:12px;color:#9aa8be}
+    .doc-path{word-break:break-all}
     pre{background:#060a14;padding:10px;border-radius:8px;overflow:auto}
     code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace}
     .status{margin-top:10px;min-height:20px}
@@ -763,6 +839,9 @@ function render_ui(PDO $pdo): void
         <p class="small" id="empty-state" style="display:none;color:#7f8aa0;margin-top:8px;">No uploads yet.</p>
       </section>
     </div>
+    <section class="workspace">
+      $selectedDocument
+    </section>
   </div>
   <script>
     const statusEl = document.getElementById('status');
