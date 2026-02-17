@@ -562,10 +562,63 @@ function handle_api(PDO $pdo, string $uri): void
     fail('not found', 404);
 }
 
-function render_ui(string $token): void
+function document_snippet(string $content, int $limit = 220): string
+{
+    $text = trim(strip_tags($content));
+    $text = preg_replace('/\s+/', ' ', $text) ?: '';
+    if ($text === '') {
+        return '';
+    }
+    if (strlen($text) <= $limit) {
+        return $text;
+    }
+    return substr($text, 0, max(0, $limit - 3)) . '...';
+}
+
+function recent_documents(PDO $pdo, int $limit = 12): array
+{
+    $limit = max(1, min(50, $limit));
+    $stmt = $pdo->prepare(
+        'SELECT path, title, content, updated_at FROM documents ORDER BY COALESCE(updated_at, id) DESC LIMIT :limit'
+    );
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->execute();
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $documents = [];
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $path = isset($row['path']) ? (string)$row['path'] : '';
+        if ($path === '') {
+            continue;
+        }
+        $title = isset($row['title']) ? (string)$row['title'] : '';
+        if ($title === '') {
+            $title = $path;
+        }
+        $content = isset($row['content']) ? (string)$row['content'] : '';
+
+        $documents[] = [
+            'path' => $path,
+            'title' => $title,
+            'snippet' => document_snippet($content, 220),
+            'updated_at' => $row['updated_at'] ?? null,
+        ];
+    }
+
+    return $documents;
+}
+
+function render_ui(string $token, PDO $pdo): void
 {
     $token = htmlspecialchars($token, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     $title = 'Agent Notebook';
+    $recent = recent_documents($pdo, 12);
+    $recent_json = json_encode($recent, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($recent_json === false) {
+        $recent_json = '[]';
+    }
     echo <<<HTML
 <!doctype html>
 <html lang="en">
@@ -579,18 +632,22 @@ function render_ui(string $token): void
     .wrap{max-width:1100px;margin:0 auto;padding:20px}
     h1{margin:12px 0 2px}
     .hint{color:var(--muted); margin:0 0 18px}
-    .toolbar{display:grid;grid-template-columns:1fr 2fr 1fr 1fr;gap:8px;margin-bottom:12px}
+    .toolbar{display:grid;grid-template-columns:1fr 180px;gap:8px;margin-bottom:12px;align-items:center}
     .toolbar input,.toolbar button{padding:10px;border-radius:10px;border:1px solid #2a3449;background:#0f1624;color:var(--text)}
     .toolbar button{background:#1d2b44; cursor:pointer}
-    .main{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .layout{display:grid;grid-template-columns:360px 1fr;gap:16px}
     .card{background:var(--panel);border:1px solid #242f43;border-radius:16px;padding:14px}
-    textarea{width:100%;min-height:430px;background:#0f1624;color:var(--text);border:1px solid #29354b;border-radius:10px;padding:12px;font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace}
-    .small{display:flex;justify-content:space-between;align-items:center;color:#b4bfd3;font-size:12px}
-    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace}
+    .small{color:#b4bfd3;font-size:12px}
     .preview{background:var(--panel);padding:12px;border:1px solid #27334a;border-radius:10px;min-height:430px;white-space:pre-wrap;line-height:1.45}
     .preview h1,.preview h2,.preview h3{margin-top:0}
+    .preview img{max-width:100%}
     .meta{display:flex;gap:10px;flex-wrap:wrap}
     .meta span{display:inline-block;border:1px solid #31405e;padding:5px 10px;border-radius:999px}
+    .doc-list{list-style:none;padding:0;margin:0}
+    .doc-list li{margin-bottom:12px;padding:10px;border:1px solid #2c3a55;border-radius:10px;background:#101a2a}
+    .doc-list a{display:block;color:var(--text);text-decoration:none;font-weight:600}
+    .doc-list a:hover{text-decoration:underline;color:var(--accent)}
+    .doc-snippet{margin:8px 0 0;color:#aeb8cc;font-size:13px;line-height:1.35}
     pre{background:#060a14;padding:10px;border-radius:8px;overflow:auto}
     code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace}
     .status{margin-top:10px;min-height:20px}
@@ -601,45 +658,35 @@ function render_ui(string $token): void
 <body>
   <div class="wrap">
     <h1>Agent Notebook</h1>
-    <p class="hint">A minimal markdown notebook for agents. Token-protected API, hierarchical pages, attachments, and markdown rendering.</p>
+    <p class="hint">A clean, read-only notebook for agents. Token-protected API with secure access to markdown pages.</p>
     <div class="toolbar">
       <input id="token" type="password" placeholder="AGENT NOTEBOOK TOKEN" value="$token" />
-      <input id="path" placeholder="Path (example: projects/agent-001/plan.md)" />
-      <input id="title" placeholder="Title" />
-      <input id="agent" placeholder="Agent name" />
-    </div>
-    <div class="toolbar">
-      <button id="load">Load</button>
-      <button id="save">Save</button>
-      <button id="renderBtn">Render Preview</button>
-      <button id="childrenBtn">List Children</button>
+      <button id="reloadBtn">Reload</button>
     </div>
     <div class="status" id="status"></div>
-    <div class="main">
+    <div class="layout">
       <section class="card">
-        <h3>Markdown Content</h3>
-        <textarea id="content" placeholder="Write markdown here..."></textarea>
-        <div style="margin-top:10px">
-          <div class="small">Upload attachment (text/image)</div>
-          <input id="file" type="file" accept=".txt,.md,.csv,.jpg,.jpeg,.png,.gif,.webp,.pdf" />
-          <button id="upload">Upload File</button>
-          <div id="attachmentStatus" class="status"></div>
-        </div>
+        <h3>Latest uploads</h3>
+        <p class="small" style="margin:0 0 8px">Pick a title to open the page.</p>
+        <ul id="recent-list" class="doc-list"></ul>
+        <p class="small" id="empty-state" style="display:none;color:#7f8aa0">No uploads yet.</p>
       </section>
       <section class="card">
-        <h3>Rendered Preview</h3>
-          <div id="preview" class="preview"></div>
-          <div class="small" style="margin-top:12px">Current metadata</div>
-          <div id="meta" class="meta"></div>
-          <div id="attachmentList" class="small" style="margin-top:12px;"></div>
-          <div class="small" style="margin-top:12px">Children</div>
-          <ul id="children"></ul>
+        <h3 id="doc-title">Home</h3>
+        <div class="meta" id="doc-meta" style="margin-bottom:12px"></div>
+        <div id="preview" class="preview">Select a document to read.</div>
       </section>
     </div>
   </div>
   <script>
     const statusEl = document.getElementById('status');
-    const attachmentStatus = document.getElementById('attachmentStatus');
+    const recentList = document.getElementById('recent-list');
+    const docTitle = document.getElementById('doc-title');
+    const docMeta = document.getElementById('doc-meta');
+    const preview = document.getElementById('preview');
+    const emptyState = document.getElementById('empty-state');
+    const reloadBtn = document.getElementById('reloadBtn');
+    const recentPages = $recent_json;
     const getAuthHeaders = () => ({
       'Authorization': 'Bearer ' + (document.getElementById('token').value || '').trim()
     });
@@ -650,31 +697,47 @@ function render_ui(string $token): void
     };
 
     const renderMeta = (doc) => {
-      const meta = document.getElementById('meta');
       if (!doc) {
-        meta.innerHTML = '';
+        docMeta.innerHTML = '';
         return;
       }
-      meta.innerHTML = [
-        `<span>revision \${doc.revision || 1}</span>`,
-        `<span>agent \${doc.agent_name || ''}</span>`,
-        `<span>updated \${doc.updated_at || ''}</span>`,
-        `<span>attachments \${((doc.attachments || []).length)}</span>`
+      docMeta.innerHTML = [
+        `<span>path: \${doc.path || ''}</span>`,
+        `<span>updated: \${doc.updated_at || ''}</span>`,
+        `<span>agent: \${doc.agent_name || 'unknown'}</span>`,
+        `<span>revision: \${doc.revision || 1}</span>`
       ].join('');
-
-      const attachmentList = document.getElementById('attachmentList');
-      if ((doc.attachments || []).length) {
-        const lines = (doc.attachments || []).map(a => `<a href="/api/attachment?id=\${a.id}" target="_blank">\${a.filename}</a> (\${a.size_bytes} bytes)`).join(' · ');
-        attachmentList.innerHTML = `Attachments: \${lines}`;
-      } else {
-        attachmentList.textContent = '';
-      }
     };
 
-    const loadPage = async () => {
-      const path = document.getElementById('path').value.trim();
+    const renderRecent = () => {
+      recentList.innerHTML = '';
+      if (!recentPages.length) {
+        emptyState.style.display = 'block';
+        return;
+      }
+      emptyState.style.display = 'none';
+      recentPages.forEach((item) => {
+        const li = document.createElement('li');
+        const link = document.createElement('a');
+        const snippet = document.createElement('p');
+        link.href = `?path=\${encodeURIComponent(item.path)}`;
+        link.textContent = item.title || item.path;
+        snippet.className = 'doc-snippet';
+        snippet.textContent = item.snippet || '';
+        link.addEventListener('click', (evt) => {
+          evt.preventDefault();
+          loadDoc(item.path);
+          window.history.replaceState({}, '', `?path=\${encodeURIComponent(item.path)}`);
+        });
+        li.appendChild(link);
+        li.appendChild(snippet);
+        recentList.appendChild(li);
+      });
+    };
+
+    const loadDoc = async (path) => {
       if (!path) {
-        setMessage('Path is required');
+        setMessage('No path selected');
         return;
       }
       setMessage('Loading...');
@@ -686,116 +749,29 @@ function render_ui(string $token): void
         setMessage(body.error || 'Load failed');
         return;
       }
-      document.getElementById('title').value = body.title || '';
-      document.getElementById('content').value = body.content_markdown || '';
-      document.getElementById('agent').value = body.agent_name || '';
-      document.getElementById('preview').innerHTML = body.content_html || '';
+      docTitle.textContent = body.title || path;
+      preview.innerHTML = body.content_html || '';
       renderMeta(body);
       setMessage('Loaded', 'ok');
     };
 
-    const savePage = async () => {
-      const path = document.getElementById('path').value.trim();
+    const params = new URLSearchParams(window.location.search);
+    const initialPath = params.get('path');
+    renderRecent();
+    if (initialPath) {
+      loadDoc(initialPath);
+    } else {
+      setMessage('Ready');
+    }
+
+    reloadBtn.onclick = () => {
+      const path = new URLSearchParams(window.location.search).get('path');
       if (!path) {
-        setMessage('Path is required');
+        setMessage('Choose a document from the list');
         return;
       }
-      const payload = {
-        title: document.getElementById('title').value.trim(),
-        content: document.getElementById('content').value,
-        agent: document.getElementById('agent').value.trim() || 'agent-anonymous'
-      };
-      const resp = await fetch('/api/page?path=' + encodeURIComponent(path), {
-        method: 'POST',
-        headers: {
-          ...getAuthHeaders(),
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
-      const body = await resp.json();
-      if (!resp.ok) {
-        setMessage(body.error || 'Save failed');
-        return;
-      }
-      document.getElementById('preview').innerHTML = body.content_html || '';
-      renderMeta(body);
-      setMessage('Saved', 'ok');
+      loadDoc(path);
     };
-
-    const renderNow = async () => {
-      const path = document.getElementById('path').value.trim();
-      if (!path) {
-        setMessage('Path is required');
-        return;
-      }
-      const resp = await fetch('/api/page?path=' + encodeURIComponent(path) + '&format=html', {
-        headers: getAuthHeaders()
-      });
-      const body = await resp.json();
-      if (!resp.ok) {
-        setMessage(body.error || 'Render failed');
-        return;
-      }
-      document.getElementById('preview').innerHTML = body.content_html || '';
-      setMessage('Rendered', 'ok');
-    };
-
-    const loadChildren = async () => {
-      const path = document.getElementById('path').value.trim();
-      const endpoint = '/api/children' + (path ? '?path=' + encodeURIComponent(path) : '');
-      const resp = await fetch(endpoint, { headers: getAuthHeaders() });
-      const body = await resp.json();
-      if (!resp.ok) {
-        setMessage(body.error || 'Children failed');
-        return;
-      }
-      const list = document.getElementById('children');
-      list.innerHTML = '';
-      (body.children || []).forEach(item => {
-        const li = document.createElement('li');
-        const btn = document.createElement('button');
-        btn.textContent = item.path;
-        btn.onclick = () => {
-          document.getElementById('path').value = item.path;
-          loadPage();
-        };
-        li.appendChild(btn);
-        list.appendChild(li);
-      });
-      setMessage('Children loaded', 'ok');
-    };
-
-    const uploadFile = async () => {
-      const path = document.getElementById('path').value.trim();
-      const fileEl = document.getElementById('file');
-      if (!path) {
-        attachmentStatus.textContent = 'Path required for upload';
-        return;
-      }
-      if (!fileEl.files || !fileEl.files.length) {
-        attachmentStatus.textContent = 'Select file first';
-        return;
-      }
-      const form = new FormData();
-      form.append('file', fileEl.files[0]);
-      const resp = await fetch('/api/upload?path=' + encodeURIComponent(path), {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: form
-      });
-      const body = await resp.json();
-      attachmentStatus.textContent = resp.ok ? ('Uploaded: ' + (body.attachment ? body.attachment.filename : 'ok')) : (body.error || 'Upload failed');
-      if (resp.ok) {
-        await loadPage();
-      }
-    };
-
-    document.getElementById('load').onclick = loadPage;
-    document.getElementById('save').onclick = savePage;
-    document.getElementById('renderBtn').onclick = renderNow;
-    document.getElementById('childrenBtn').onclick = loadChildren;
-    document.getElementById('upload').onclick = uploadFile;
   </script>
 </body>
 </html>
@@ -830,7 +806,7 @@ if ($uri === '/agents.md') {
 
 if ($method === 'GET' && $uri === '/') {
     $token = getenv('AGENT_NOTEBOOK_TOKEN') ?: '';
-    render_ui((string)$token);
+    render_ui((string)$token, $db);
 }
 
 json_response(['success' => true, 'message' => 'Agent Notebook is running', 'routes' => ['/api/page', '/api/children', '/api/upload', '/api/attachment', '/api/agents.md']], 200);
