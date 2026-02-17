@@ -754,16 +754,16 @@ function render_document_view(PDO $pdo, string $path): string
     try {
         $normalized = normalize_path($path);
     } catch (InvalidArgumentException) {
-        return '<section class="card selected-doc"><h3>Document</h3><p class="warn">Invalid document path.</p></section>';
+        return '<div class="card selected-doc"><h3>Document</h3><p class="warn">Invalid document path.</p></div>';
     }
 
     if ($normalized === '') {
-        return '<section class="card selected-doc"><h3>Document</h3><p class="small">Select a document from the left tree or latest list to preview it.</p></section>';
+        return '<div class="card selected-doc"><h3>Document</h3><p class="small">Select a document from the left tree or latest list to preview it.</p></div>';
     }
 
     $document = get_document($pdo, $normalized);
     if (!$document) {
-        return '<section class="card selected-doc"><h3>Document</h3><p class="warn">Document not found.</p></section>';
+        return '<div class="card selected-doc"><h3>Document</h3><p class="warn">Document not found.</p></div>';
     }
 
     $title = htmlspecialchars((string)($document['title'] ?? $normalized), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -781,7 +781,7 @@ function render_document_view(PDO $pdo, string $path): string
     }
 
     $pathLabel = htmlspecialchars($normalized, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-    return '<section class="card selected-doc"><h3>' . $title . '</h3><p class="small doc-path">' . $pathLabel . '</p><div class="doc-content">' . $content . '</div>' . $attachmentsHtml . '</section>';
+    return '<div class="card selected-doc"><h3>' . $title . '</h3><p class="small doc-path">' . $pathLabel . '</p><div class="doc-content">' . $content . '</div>' . $attachmentsHtml . '</div>';
 }
 
 function document_tree(PDO $pdo): array
@@ -928,7 +928,8 @@ function render_ui(PDO $pdo, string $selectedPath = ''): void
     .wrap{max-width:1100px;margin:0 auto;padding:20px}
     h1{margin:12px 0 2px}
     .hint{color:var(--muted); margin:0 0 18px}
-    .layout{display:grid;grid-template-columns:360px 1fr;gap:16px}
+    .layout{display:grid;grid-template-columns:minmax(420px, 1.2fr) minmax(380px, 1fr);gap:16px;align-items:start}
+    .left-column{display:flex;flex-direction:column;gap:16px}
     .card{background:var(--panel);border:1px solid #242f43;border-radius:16px;padding:14px}
     .small{color:#b4bfd3;font-size:12px}
     .tree-list{list-style:none;padding:0;margin:0}
@@ -942,7 +943,12 @@ function render_ui(PDO $pdo, string $selectedPath = ''): void
     .doc-list a{display:block;color:var(--text);text-decoration:none;font-weight:600}
     .doc-list a:hover{text-decoration:underline;color:var(--accent)}
     .doc-snippet{margin:8px 0 0;color:#aeb8cc;font-size:13px;line-height:1.35}
-    .workspace{margin-top:16px}
+    .workspace{display:block}
+    .selected-doc{margin:0}
+    @media (max-width: 900px){
+      .layout{grid-template-columns:1fr}
+      .left-column{gap:12px}
+    }
     .doc-content h1,.doc-content h2,.doc-content h3{margin-top:0}
     .doc-content pre{background:#060a14;padding:10px;border-radius:8px;overflow:auto}
     .doc-content code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace}
@@ -962,21 +968,23 @@ function render_ui(PDO $pdo, string $selectedPath = ''): void
     <h1>Agent Notebook</h1>
     <p class="hint">A clean, read-only notebook for agents. Browse documents by hierarchy on the left and scan latest pages on the right.</p>
     <div class="layout">
-      <section class="card">
-        <h3>Documents</h3>
-        <div class="tree-list" style="margin-top:8px;">
-          $tree_html
-        </div>
-      </section>
-      <section class="card">
-        <h3>Latest documents</h3>
-        <ul id="recent-list" class="doc-list" style="margin-top:8px;"></ul>
-        <p class="small" id="empty-state" style="display:none;color:#7f8aa0;margin-top:8px;">No uploads yet.</p>
-      </section>
+      <div class="left-column">
+        <section class="card">
+          <h3>Documents</h3>
+          <div class="tree-list" style="margin-top:8px;">
+            $tree_html
+          </div>
+        </section>
+        <section class="card">
+          <h3>Latest documents</h3>
+          <ul id="recent-list" class="doc-list" style="margin-top:8px;"></ul>
+          <p class="small" id="empty-state" style="display:none;color:#7f8aa0;margin-top:8px;">No uploads yet.</p>
+        </section>
+      </div>
+      <div class="workspace">
+        $selectedDocument
+      </div>
     </div>
-    <section class="workspace">
-      $selectedDocument
-    </section>
   </div>
   <script>
     const recentList = document.getElementById('recent-list');
