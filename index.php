@@ -619,6 +619,20 @@ function recent_documents(PDO $pdo, int $limit = 12): array
     return $documents;
 }
 
+function get_home_document_path(PDO $pdo): ?string
+{
+    $candidates = ['index.md', 'index', 'README.md', 'readme.md', 'home.md'];
+    $stmt = $pdo->prepare('SELECT path FROM documents WHERE path = :path LIMIT 1');
+    foreach ($candidates as $candidate) {
+        $stmt->execute([':path' => $candidate]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row && isset($row['path']) && is_string($row['path'])) {
+            return $row['path'];
+        }
+    }
+    return null;
+}
+
 function clean_doc_path_for_url(string $path): string
 {
     $trimmed = trim($path);
@@ -752,13 +766,24 @@ function document_tree(PDO $pdo): array
     return $tree;
 }
 
-function render_document_tree_html(array $tree): string
+function render_document_tree_html(array $tree, ?string $homePath = null): string
 {
+    $homePath = normalize_path($homePath ?? '');
     if (empty($tree)) {
-        return '<p class="small">No documents yet.</p>';
+        if ($homePath === '') {
+            return '<p class="small">No documents yet.</p>';
+        }
     }
 
-    $renderNode = function (array $node) use (&$renderNode): string {
+    $homeHtml = '';
+    if ($homePath !== '') {
+        $safePath = htmlspecialchars($homePath, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $cleanPath = clean_doc_path_for_url($homePath);
+        $docHref = $cleanPath === '' ? '/doc' : '/doc/' . $cleanPath;
+        $homeHtml = '<li class="home-item"><a href="' . $docHref . '" class="doc-link">Home</a><span class="home-meta">index</span></li>';
+    }
+
+    $renderNode = function (array $node) use (&$renderNode, $homePath): string {
         ksort($node, SORT_STRING);
         $html = '<ul class="tree">';
         foreach ($node as $item) {
@@ -766,16 +791,18 @@ function render_document_tree_html(array $tree): string
             $document = $item['document'] ?? null;
             $children = is_array($item['children'] ?? null) ? $item['children'] : [];
 
-            $html .= '<li>';
             if (is_array($document)) {
                 $path = (string)($document['path'] ?? '');
+                if (normalize_path($path) === $homePath) {
+                    continue;
+                }
                 $title = htmlspecialchars((string)($document['title'] ?? $path), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
                 $safePath = htmlspecialchars($path, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-            $cleanPath = clean_doc_path_for_url($path);
-            $docHref = $cleanPath === '' ? '/doc' : '/doc/' . $cleanPath;
-            $html .= '<a href="' . $docHref . '" class="doc-link" data-doc-path="' . $safePath . '">' . $title . '</a>';
+                $cleanPath = clean_doc_path_for_url($path);
+                $docHref = $cleanPath === '' ? '/doc' : '/doc/' . $cleanPath;
+                $html .= '<li><a href="' . $docHref . '" class="doc-link" data-doc-path="' . $safePath . '">' . $title . '</a>';
             } else {
-                $html .= '<span class="folder">' . $folderName . '</span>';
+                $html .= '<li><span class="folder">' . $folderName . '</span>';
             }
 
             if (!empty($children)) {
@@ -791,7 +818,18 @@ function render_document_tree_html(array $tree): string
         return $html;
     };
 
-    return $renderNode($tree);
+    if ($homeHtml === '' && empty($tree)) {
+        return '<p class="small">No documents yet.</p>';
+    }
+
+    $treeHtml = $renderNode($tree);
+    if ($homeHtml === '') {
+        return $treeHtml;
+    }
+    if ($treeHtml === '<ul class="tree"></ul>') {
+        return '<ul class="tree">' . $homeHtml . '</ul>';
+    }
+    return preg_replace('/^<ul class="tree">/', '<ul class="tree">' . $homeHtml, $treeHtml, 1);
 }
 
 function render_ui(PDO $pdo, string $selectedPath = ''): void
@@ -802,7 +840,8 @@ function render_ui(PDO $pdo, string $selectedPath = ''): void
     if ($recent_json === false) {
         $recent_json = '[]';
     }
-    $tree_html = render_document_tree_html(document_tree($pdo));
+    $homePath = get_home_document_path($pdo);
+    $tree_html = render_document_tree_html(document_tree($pdo), $homePath);
     $querySelectedPath = isset($_GET['path']) ? trim((string)$_GET['path']) : '';
     $effectiveSelectedPath = $selectedPath !== '' ? $selectedPath : $querySelectedPath;
     $selectedDocument = render_document_view($pdo, $effectiveSelectedPath);
@@ -926,22 +965,24 @@ if (strpos($uri, '/api/') === 0 || $uri === '/api' || $uri === '/api/agents.md')
     handle_api($db, $uri);
 }
 
-if ($uri === '/agents.md') {
-    // Public render path that still uses token policy.
-    require_auth();
-    $doc = get_document($db, 'agents.md');
-    if (!$doc) {
-        fail('agents.md not found', 404);
+    if ($uri === '/agents.md') {
+        // Public render path that still uses token policy.
+        require_auth();
+        $doc = get_document($db, 'agents.md');
+        if (!$doc) {
+            fail('agents.md not found', 404);
+        }
+        header('Content-Type: text/markdown; charset=utf-8');
+        echo (string)$doc['content'];
+        exit;
     }
-    header('Content-Type: text/markdown; charset=utf-8');
-    echo (string)$doc['content'];
-    exit;
-}
 
 if ($method === 'GET' && ($uri === '/' || $uri === '/doc' || string_starts_with($uri, '/doc/'))) {
     $selectedPath = '';
     if (string_starts_with($uri, '/doc/')) {
         $selectedPath = rawurldecode(substr($uri, 5));
+    } else {
+        $selectedPath = get_home_document_path($db) ?: '';
     }
     render_ui($db, $selectedPath);
 }
