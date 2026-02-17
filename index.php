@@ -221,6 +221,20 @@ function parse_json_body(): array
     return is_array($decoded) ? $decoded : [];
 }
 
+function linkify_plain_urls(string $text): string
+{
+    return preg_replace_callback(
+        '~https?://[^\\s<>"\']+~',
+        static function (array $matches): string {
+            $raw = (string)$matches[0];
+            $url = rtrim($raw, '.,;:!?)]}>');
+            $escaped = htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            return '<a href="' . $escaped . '" target="_blank" rel="noopener noreferrer">' . $escaped . '</a>';
+        },
+        $text
+    );
+}
+
 function simple_markdown_to_html(string $markdown): string
 {
     $html = htmlspecialchars($markdown, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -232,16 +246,7 @@ function simple_markdown_to_html(string $markdown): string
     $html = preg_replace('/\*(.+?)\*/s', '<em>$1</em>', $html);
     $html = preg_replace('/`([^`]+)`/', '<code>$1</code>', $html);
     $html = preg_replace('/\\[(.*?)\\]\\((.*?)\\)/', '<a href="$2">$1</a>', $html);
-    $html = preg_replace_callback(
-        "/(?<![\\w\\/])((?:https?:\\/\\/)[^\\s<>\"']+)/",
-        static function (array $matches): string {
-            $url = $matches[1];
-            $url = rtrim($url, ".,;:!?)]}>");
-            $escaped = htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-            return '<a href="' . $escaped . '" target="_blank" rel="noopener noreferrer">' . $escaped . '</a>';
-        },
-        $html
-    );
+    $html = linkify_plain_urls($html);
     $lines = preg_split('/\\r?\\n/', $html);
     if (!is_array($lines)) {
         return '<p>' . nl2br((string)$html) . '</p>';
