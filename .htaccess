@@ -4,6 +4,10 @@ Options -Indexes
   Require all denied
 </FilesMatch>
 
+<Files ".env">
+  Require all denied
+</Files>
+
 <IfModule mod_headers.c>
   <Files "index.php">
     Header set X-Content-Type-Options "nosniff"
