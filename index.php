@@ -122,9 +122,11 @@ function render_frontend_login(string $error = ''): void
     :root { color-scheme: dark; --panel:#121826; --text:#ecf0f6; --muted:#98a2b3; --accent:#5dd6ff; --warn:#ffcc66; }
     html,body{margin:0;height:100%;font-family:Inter, "Segoe UI", sans-serif;background:radial-gradient(circle at 25% 0%, #1a2236 0%, #090b11 52%, #090b11 100%);color:var(--text);}
     .wrap{max-width:420px;margin:80px auto;padding:20px}
-    .card{background:var(--panel);border:1px solid #242f43;border-radius:16px;padding:22px}
-    input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #2d3d57;background:#0b111e;color:var(--text)}
-    button{margin-top:12px;padding:10px 14px;border:0;border-radius:10px;background:#2b6cff;color:white;font-weight:600}
+    .card{background:var(--panel);border:1px solid #242f43;border-radius:16px;padding:22px;box-sizing:border-box}
+    .login-form input,.login-form button{box-sizing:border-box}
+    .login-form{display:flex;flex-direction:column;gap:12px}
+    input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #2d3d57;background:#0b111e;color:var(--text);font:inherit;display:block;min-width:0}
+    button{margin-top:0;padding:10px 14px;border:0;border-radius:10px;background:#2b6cff;color:white;font-weight:600}
     .hint{color:var(--muted);font-size:13px;margin-top:12px}
     .warn{color:var(--warn);margin-top:8px;font-size:13px}
   </style>
@@ -134,7 +136,7 @@ function render_frontend_login(string $error = ''): void
     <div class="card">
       <h1>Agent Notebook Login</h1>
       <p class="hint">Enter your API key to access the notebook.</p>
-      <form method="POST" action="">
+      <form method="POST" action="" class="login-form">
         <input type="hidden" name="return_to" value="$returnTo" />
         <input type="password" name="api_key" placeholder="API key" autofocus autocomplete="off" />
         <button type="submit">Sign in</button>
