@@ -885,7 +885,7 @@ function render_ui(PDO $pdo, string $selectedPath = ''): void
         const li = document.createElement('li');
         const link = document.createElement('a');
         const snippet = document.createElement('p');
-        const toDocUrl = (path) => `/doc/${path.split('/').map(encodeURIComponent).join('/')}`;
+        const toDocUrl = (path) => '/doc/' + path.split('/').map(encodeURIComponent).join('/');
         link.href = toDocUrl(item.path);
         link.textContent = item.title || item.path;
         snippet.className = 'doc-snippet';
