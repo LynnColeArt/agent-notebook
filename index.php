@@ -954,16 +954,13 @@ function render_ui(PDO $pdo, string $selectedPath = ''): void
     .doc-path{word-break:break-all}
     pre{background:#060a14;padding:10px;border-radius:8px;overflow:auto}
     code{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace}
-    .status{margin-top:10px;min-height:20px}
-    .ok{color:#7ee787}
-    .warn{color:#ffcc66}
+    
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Agent Notebook</h1>
     <p class="hint">A clean, read-only notebook for agents. Browse documents by hierarchy on the left and scan latest pages on the right.</p>
-    <div class="status" id="status"></div>
     <div class="layout">
       <section class="card">
         <h3>Documents</h3>
@@ -982,15 +979,9 @@ function render_ui(PDO $pdo, string $selectedPath = ''): void
     </section>
   </div>
   <script>
-    const statusEl = document.getElementById('status');
     const recentList = document.getElementById('recent-list');
     const emptyState = document.getElementById('empty-state');
     const recentPages = $recent_json;
-
-    const setMessage = (msg, cls='warn') => {
-      statusEl.textContent = msg;
-      statusEl.className = 'status ' + cls;
-    };
 
     const renderRecent = () => {
       recentList.innerHTML = '';
@@ -1014,7 +1005,6 @@ function render_ui(PDO $pdo, string $selectedPath = ''): void
       });
     };
     renderRecent();
-    setMessage('Ready');
   </script>
 </body>
 </html>
