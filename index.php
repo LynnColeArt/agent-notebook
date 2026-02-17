@@ -232,6 +232,15 @@ function simple_markdown_to_html(string $markdown): string
     $html = preg_replace('/\*(.+?)\*/s', '<em>$1</em>', $html);
     $html = preg_replace('/`([^`]+)`/', '<code>$1</code>', $html);
     $html = preg_replace('/\\[(.*?)\\]\\((.*?)\\)/', '<a href="$2">$1</a>', $html);
+    $html = preg_replace_callback(
+        '/(?<![\\w\\/.\\-])((?:https?:\\/\\/)[^\\s<>\"\\']*[A-Za-z0-9\\/_#\\-=&?%.~+:%@!])/u',
+        static function (array $matches): string {
+            $url = $matches[1];
+            $escaped = htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            return '<a href="' . $escaped . '" target="_blank" rel="noopener noreferrer">' . $escaped . '</a>';
+        },
+        $html
+    );
     $lines = preg_split('/\\r?\\n/', $html);
     if (!is_array($lines)) {
         return '<p>' . nl2br((string)$html) . '</p>';
