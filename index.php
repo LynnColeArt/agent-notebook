@@ -610,6 +610,23 @@ function recent_documents(PDO $pdo, int $limit = 12): array
     return $documents;
 }
 
+function clean_doc_path_for_url(string $path): string
+{
+    $trimmed = trim($path);
+    if ($trimmed === '') {
+        return '';
+    }
+    $segments = preg_split('/\/+/', trim($trimmed, '/'));
+    if ($segments === false || $segments === []) {
+        return '';
+    }
+    $segments = array_values(array_filter($segments, 'strlen'));
+    if (!$segments) {
+        return '';
+    }
+    return implode('/', array_map('rawurlencode', $segments));
+}
+
 function is_image_mime(string $mimeType): bool
 {
     $normalized = strtolower(trim($mimeType));
@@ -745,7 +762,9 @@ function render_document_tree_html(array $tree): string
                 $path = (string)($document['path'] ?? '');
                 $title = htmlspecialchars((string)($document['title'] ?? $path), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
                 $safePath = htmlspecialchars($path, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-                $html .= '<a href="?path=' . $safePath . '" class="doc-link" data-doc-path="' . $safePath . '">' . $title . '</a>';
+            $cleanPath = clean_doc_path_for_url($path);
+            $docHref = $cleanPath === '' ? '/doc' : '/doc/' . $cleanPath;
+            $html .= '<a href="' . $docHref . '" class="doc-link" data-doc-path="' . $safePath . '">' . $title . '</a>';
             } else {
                 $html .= '<span class="folder">' . $folderName . '</span>';
             }
@@ -766,7 +785,7 @@ function render_document_tree_html(array $tree): string
     return $renderNode($tree);
 }
 
-function render_ui(PDO $pdo): void
+function render_ui(PDO $pdo, string $selectedPath = ''): void
 {
     $title = 'Agent Notebook';
     $recent = recent_documents($pdo, 12);
@@ -775,8 +794,9 @@ function render_ui(PDO $pdo): void
         $recent_json = '[]';
     }
     $tree_html = render_document_tree_html(document_tree($pdo));
-    $selectedPath = isset($_GET['path']) ? trim((string)$_GET['path']) : '';
-    $selectedDocument = render_document_view($pdo, $selectedPath);
+    $querySelectedPath = isset($_GET['path']) ? trim((string)$_GET['path']) : '';
+    $effectiveSelectedPath = $selectedPath !== '' ? $selectedPath : $querySelectedPath;
+    $selectedDocument = render_document_view($pdo, $effectiveSelectedPath);
     echo <<<HTML
 <!doctype html>
 <html lang="en">
@@ -865,7 +885,8 @@ function render_ui(PDO $pdo): void
         const li = document.createElement('li');
         const link = document.createElement('a');
         const snippet = document.createElement('p');
-        link.href = `?path=\${encodeURIComponent(item.path)}`;
+        const toDocUrl = (path) => `/doc/${path.split('/').map(encodeURIComponent).join('/')}`;
+        link.href = toDocUrl(item.path);
         link.textContent = item.title || item.path;
         snippet.className = 'doc-snippet';
         snippet.textContent = item.snippet || '';
@@ -908,8 +929,12 @@ if ($uri === '/agents.md') {
     exit;
 }
 
-if ($method === 'GET' && $uri === '/') {
-    render_ui($db);
+if ($method === 'GET' && ($uri === '/' || $uri === '/doc' || string_starts_with($uri, '/doc/'))) {
+    $selectedPath = '';
+    if (string_starts_with($uri, '/doc/')) {
+        $selectedPath = rawurldecode(substr($uri, 5));
+    }
+    render_ui($db, $selectedPath);
 }
 
 json_response(['success' => true, 'message' => 'Agent Notebook is running', 'routes' => ['/api/page', '/api/children', '/api/upload', '/api/attachment', '/api/agents.md']], 200);
